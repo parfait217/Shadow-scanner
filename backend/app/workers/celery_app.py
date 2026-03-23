@@ -7,6 +7,7 @@ celery_app = Celery(
     broker=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
     backend=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
     include=[
+        "app.workers.orchestrator",
         "app.workers.worker_dns",
         "app.workers.worker_http",
         "app.workers.worker_geoip",

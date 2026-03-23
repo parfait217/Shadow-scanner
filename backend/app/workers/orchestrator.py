@@ -1,5 +1,7 @@
 from celery import chain, chord, group
 import logging
+import asyncio
+from datetime import datetime, timezone
 
 from app.workers.celery_app import celery_app
 from app.workers.worker_dns import scan_dns
@@ -7,6 +9,9 @@ from app.workers.worker_secrets import scan_secrets
 from app.workers.worker_harvester import harvest_emails
 from app.workers.worker_http import scan_http
 from app.workers.worker_geoip import scan_geoip
+from app.core.dependencies import AsyncSessionLocal
+from app.models.scan import Scan
+from sqlalchemy import update
 
 logger = logging.getLogger(__name__)
 
@@ -38,32 +43,35 @@ def run_project_scan(self, scan_id: str, project_id: str, root_domain: str):
 
 @celery_app.task(bind=True)
 def finalize_scan(self, results, scan_id: str):
-    """Callback appelé quand les modules principaux sont terminés. Calcule le score global et met status à 'done'."""
-    logger.info(f"[Orchestrator] Consolidated Results: {results}")
-    logger.info(f"[Orchestrator] Scan {scan_id} entièrement terminé.")
+    """Callback appelé quand les modules principaux sont terminés."""
+    logger.info(f"[Orchestrator] Scan {scan_id} terminant sa phase de collecte.")
 
-    # Algorithme métier de calcul du score (Risk Score)
-    base_score = 100
+    # Calcul simple du score
     risk_score = 100
-    
-    # 1. Analyser les résultats bruts
     for res in results:
         if isinstance(res, dict):
-            # Pénalité s'il y a des secrets trouvés (-20 par secret)
-            if "findings" in res:
-                risk_score -= len(res["findings"]) * 20
-            # Pénalité de -5 par email leaké
-            if "breaches" in res and res["breaches"]:
-                risk_score -= 5
-
-    # Clamp à 0 minimum
+            if "findings_count" in res:
+                risk_score -= res["findings_count"] * 10
+            if "breaches_count" in res:
+                risk_score -= res["breaches_count"] * 5
+    
     risk_score = max(0, risk_score)
-    logger.info(f"[Orchestrator] Risk Score calculé pour scan {scan_id} = {risk_score}/{base_score}")
+
+    async def _update_db():
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(Scan).where(Scan.id == scan_id).values(
+                    status="completed",
+                    risk_score=risk_score,
+                    finished_at=datetime.now(timezone.utc)
+                )
+            )
+            await session.commit()
     
-    # TODO: Appel base de données SQLAlchemy pour finaliser
-    # scan = db.query(Scan).get(scan_id)
-    # scan.status = "done"
-    # scan.risk_score = risk_score
-    # db.commit()
-    
-    return {"scan_id": scan_id, "final_score": risk_score, "status": "done"}
+    try:
+        asyncio.run(_update_db())
+        logger.info(f"[Orchestrator] Scan {scan_id} finalisé avec score {risk_score}.")
+    except Exception as e:
+        logger.error(f"[Orchestrator] Erreur de finalisation DB: {e}")
+
+    return {"scan_id": scan_id, "final_score": risk_score, "status": "completed"}

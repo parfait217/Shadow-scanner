@@ -1,12 +1,17 @@
 from app.workers.celery_app import celery_app
 from app.utils.http_client import fetch_json, fetch_text
 from app.workers.worker_http import scan_http
-from app.workers.worker_geoip import scan_geoip
-from celery import chord
+# from app.workers.worker_geoip import scan_geoip  # À utiliser plus tard
+from app.core.dependencies import AsyncSessionLocal
+from app.models.asset import Asset
+from app.models.scan import Scan
+
 import asyncio
+import dns.asyncresolver
 import logging
 import uuid
-from typing import Set
+from typing import Set, List
+from sqlalchemy import select, update
 
 logger = logging.getLogger(__name__)
 
@@ -42,52 +47,87 @@ async def _fetch_hackertarget(domain: str) -> Set[str]:
                 subdomains.add(sub)
     return subdomains
 
+async def _resolve_dns(domain: str) -> str:
+    """Résout une adresse IPv4 pour un domaine donné."""
+    try:
+        resolver = dns.asyncresolver.Resolver()
+        resolver.timeout = 2
+        resolver.lifetime = 2
+        answers = await resolver.resolve(domain, "A")
+        if answers:
+            return str(answers[0])
+    except Exception:
+        pass
+    return None
+
 @celery_app.task(bind=True, max_retries=3)
 def scan_dns(self, scan_id: str, target_domain: str):
     """
-    Découverte de sous-domaines (crt.sh, HackerTarget) puis lancement de l'étape suivante (HTTP/GeoIP).
-    Dans Celery, on doit lancer la boucle event async manuellement si on a des fcts async.
+    Découverte de sous-domaines, résolution IP et persistence PostgreSQL.
     """
     logger.info(f"[DNS Worker] Scan {scan_id} pour {target_domain}")
     
-    # 1. Résolution asynchrone concurrente
-    async def _gather():
-        crt, ht = await asyncio.gather(
+    async def _run_scan():
+        # 1. Énumération passive
+        results = await asyncio.gather(
             _fetch_crt_sh(target_domain),
             _fetch_hackertarget(target_domain)
         )
-        return crt.union(ht)
-    
+        found_subdomains = set().union(*results)
+        found_subdomains.add(target_domain)
+        
+        logger.info(f"[DNS Worker] {len(found_subdomains)} sous-domaines identifiés.")
+
+        # 2. Résolution IP et Persistence
+        async with AsyncSessionLocal() as session:
+            # On passe le scan en statut "running"
+            await session.execute(
+                update(Scan).where(Scan.id == scan_id).values(status="running")
+            )
+            await session.commit()
+            
+            current_count = 0
+            tasks = []
+            
+            for sub in found_subdomains:
+                ip = await _resolve_dns(sub)
+                asset = Asset(
+                    id=uuid.uuid4(),
+                    scan_id=scan_id,
+                    type="subdomain",
+                    value=sub,
+                    ip=ip,
+                    is_alive=True if ip else False
+                )
+                session.add(asset)
+                current_count += 1
+                
+                # Commit par lots de 10 pour voir la progression
+                if current_count % 10 == 0:
+                    await session.execute(
+                        update(Scan).where(Scan.id == scan_id).values(assets_count=current_count)
+                    )
+                    await session.commit()
+                
+                if asset.is_alive:
+                    tasks.append(scan_http.s(scan_id, str(asset.id), asset.value))
+            
+            # Final commit pour le reste
+            await session.execute(
+                update(Scan).where(Scan.id == scan_id).values(assets_count=current_count)
+            )
+            await session.commit()
+            
+            # 3. Lancer les scans suivants (HTTP)
+            if tasks:
+                from celery import group
+                group(tasks).apply_async()
+            
+        return len(found_subdomains)
+
     try:
-        found_subdomains = asyncio.run(_gather())
+        count = asyncio.run(_run_scan())
+        return {"status": "success", "subdomains_found": count}
     except Exception as e:
-        logger.error(f"[DNS Worker] Erreur asynchrone: {e}")
-        found_subdomains = set()
-    found_subdomains.add(target_domain)  # On ajoute toujours le domaine racine
-    
-    logger.info(f"[DNS Worker] {len(found_subdomains)} trouvés pour {target_domain}")
-
-    # 2. Sauvegarde dans la base
-    # (En condition réelle, on appellerait une session sqlalchemy synchrone ou un endpoint interne)
-    # TODO: Enregistrer Asset(type="subdomain", value=sub)
-
-    # 3. Lancer les Scans HTTP et GeoIP pour CHAQUE sous_domaine.
-    tasks = []
-    for sub in found_subdomains:
-        # Mock d'UUID pour chaque Asset inséré en base
-        asset_id = str(uuid.uuid4())
-        
-        # On peut attacher la résolution DNS à ces tâches. Pour l'instant on passe l'ID
-        # scan_http sera chargé du TLS et du Shodan/Ports
-        # scan_geoip sera chargé de l'ASN de l'IP une fois lue (résolution faite dans le worker_http idéalement)
-        
-        # Le trigger: HTTP
-        tasks.append(scan_http.s(scan_id, asset_id, sub))
-    
-    # Exécution des tâches HTTP en parallèle.
-    if tasks:
-        # On utilise une map simple. chord() pourrait fermer si on a un cleanup.
-        from celery import group
-        group(tasks).apply_async()
-
-    return {"subdomains": list(found_subdomains)}
+        logger.error(f"[DNS Worker] Échec critique : {e}")
+        self.retry(exc=e, countdown=60)
