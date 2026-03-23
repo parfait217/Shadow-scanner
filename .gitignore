@@ -1,0 +1,46 @@
+# Environnement
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Alembic
+# On conserve les migrations dans Git pour le travail d'équipe
+!backend/alembic/versions/.gitkeep
+
+# Node.js / React
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+frontend/build/
+frontend/.env.local
+
+# Docker
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Tests
+.coverage
+htmlcov/
+.pytest_cache/

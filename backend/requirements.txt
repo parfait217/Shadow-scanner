@@ -1,0 +1,47 @@
+# ============================================================
+# Shadow-Scanner — Dépendances Backend
+# ============================================================
+
+# --- Framework API ---
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+
+# --- Base de données ---
+sqlalchemy==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
+
+# --- Validation ---
+pydantic==2.7.1
+pydantic-settings==2.2.1
+email-validator==2.1.1
+
+# --- Authentification & Sécurité ---
+python-jose[cryptography]==3.3.0
+argon2-cffi==23.1.0
+redis==5.0.4
+
+# --- Workers Celery ---
+celery==5.4.0
+celery[redis]==5.4.0
+kombu==5.3.5
+
+# --- HTTP Client (pour les APIs externes) ---
+httpx==0.27.0
+aiohttp==3.9.5
+
+# --- Génération PDF ---
+weasyprint==62.1
+
+# --- Utilitaires ---
+python-multipart==0.0.9
+python-dotenv==1.0.1
+dnspython==2.6.1
+
+# --- WebSocket ---
+websockets==12.0
+
+# --- Tests ---
+pytest==8.2.0
+pytest-asyncio==0.23.6
+httpx==0.27.0
