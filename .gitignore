@@ -22,6 +22,10 @@ env/
 # On conserve les migrations dans Git pour le travail d'équipe
 !backend/alembic/versions/.gitkeep
 
+# Celery
+backend/celerybeat-schedule
+celerybeat-schedule
+
 # Node.js / React
 frontend/node_modules/
 frontend/.next/
