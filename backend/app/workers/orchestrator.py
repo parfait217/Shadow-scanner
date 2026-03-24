@@ -9,7 +9,7 @@ from app.workers.worker_secrets import scan_secrets
 from app.workers.worker_harvester import harvest_emails
 from app.workers.worker_http import scan_http
 from app.workers.worker_geoip import scan_geoip
-from app.core.dependencies import AsyncSessionLocal
+from app.core.dependencies import get_worker_session
 from app.models.scan import Scan
 from sqlalchemy import update
 
@@ -58,7 +58,7 @@ def finalize_scan(self, results, scan_id: str):
     risk_score = max(0, risk_score)
 
     async def _update_db():
-        async with AsyncSessionLocal() as session:
+        async with get_worker_session() as session:
             await session.execute(
                 update(Scan).where(Scan.id == scan_id).values(
                     status="completed",

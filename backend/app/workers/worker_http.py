@@ -1,12 +1,16 @@
 from app.workers.celery_app import celery_app
-from app.utils.http_client import fetch_json, client
+from app.utils.http_client import fetch_json
+import httpx
 from app.workers.worker_cve import scan_cve
 from app.workers.worker_geoip import scan_geoip
 from app.core.config import settings
+from app.core.dependencies import get_worker_session
+from app.models.service import Service
 
 import asyncio
 import logging
 import socket
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +23,17 @@ async def _resolve_ip(hostname: str) -> str:
         return ip
     except Exception:
         return None
+
+async def _scan_port(ip: str, port: int, timeout: float = 1.0) -> bool:
+    """Vérifie si un port TCP est ouvert via asyncio."""
+    try:
+        conn = asyncio.open_connection(ip, port)
+        reader, writer = await asyncio.wait_for(conn, timeout=timeout)
+        writer.close()
+        await writer.wait_closed()
+        return True
+    except:
+        return False
 
 async def _shodan_fallback_scan(ip: str):
     """
@@ -36,51 +51,71 @@ async def _shodan_fallback_scan(ip: str):
 @celery_app.task(bind=True, max_retries=3)
 def scan_http(self, scan_id: str, asset_id: str, target: str):
     """
-    Détection HTTP(s) et bannières, et orchestration de GeoIP et CVE si découverte.
-    `target` = nom de domaine (ex: dev.example.com).
+    Détection de services (Port Scan) et bannières HTTP.
     """
-    logger.info(f"[HTTP Worker] Scan de {target} (Asset: {asset_id})")
+    logger.info(f"[Service Worker] Analyse de {target} (Asset: {asset_id})")
     
+    ports_to_scan = [21, 22, 25, 53, 80, 111, 443, 445, 3306, 5432, 6379, 8080, 8443]
+
     async def logic():
-        # 1. Résolution de base
+        # 1. Résolution IP
         ip = await _resolve_ip(target)
         if not ip:
-            logger.info(f"[HTTP Worker] Résolution impossible pour {target}.")
-            return {"alive": False}
+            return {"alive": False, "error": "DNS_FAIL"}
             
-        logger.info(f"[HTTP Worker] {target} -> {ip}")
-        
-        # 1.5 Lancement asynchrone immédiat du GeoIP sachant l'IP
+        # 1.5 Lancement asynchrone GeoIP
         scan_geoip.delay(scan_id, asset_id, ip)
         
-        # 2. Shodan (Richesses) si présent
-        shodan_data = await _shodan_fallback_scan(ip)
-        if shodan_data:
-            ports = shodan_data.get("ports", [])
-            logger.info(f"[HTTP Worker] Shodan a trouvé {len(ports)} ports pour {ip}")
-            # Si d'autres infos dispo, on délègue:
-            for port in ports:
-                # ex: appel scan_cve si on identifie un produit dans les CPEs shodan
-                pass
-                
-        # 3. Validation HTTP maison basique (si pas de shodan ou pour compléter)
-        # Port 80 et 443
-        headers_found = {}
-        for scheme in ["http", "https"]:
-            url = f"{scheme}://{target}"
-            try:
-                # Check HTTP (max 5 sec)
-                resp = await client.get(url, timeout=5.0, verify=False, follow_redirects=False)
-                headers_found[scheme] = dict(resp.headers)
-            except Exception as e:
-                pass
-                
-        # TODO: Sauvegarder dans Service Repositories
+        # 2. Scan de ports asynchrone (Concurrence de 10)
+        sem = asyncio.Semaphore(10)
+        async def _check(p):
+            async with sem:
+                is_open = await _scan_port(ip, p)
+                return p if is_open else None
         
-        return {"ip": ip, "http_headers": headers_found}
+        open_ports = await asyncio.gather(*[_check(p) for p in ports_to_scan])
+        open_ports = [p for p in open_ports if p]
+        
+        logger.info(f"[Service Worker] {len(open_ports)} ports ouverts sur {ip}: {open_ports}")
+
+        # 3. Persistence des services
+        async with get_worker_session() as session:
+            services_created = []
+            for port in open_ports:
+                service = Service(
+                    id=uuid.uuid4(),
+                    asset_id=asset_id,
+                    port=port,
+                    protocol="tcp",
+                    product="Unknown", # Placeholder
+                    version=""
+                )
+                
+                # Fingerprint basique pour HTTP
+                if port in [80, 443]:
+                    scheme = "https" if port == 443 else "http"
+                    try:
+                        async with httpx.AsyncClient(timeout=3.0, verify=False) as http_client:
+                            resp = await http_client.get(f"{scheme}://{target}", follow_redirects=False)
+                            server = resp.headers.get("Server", "Unknown")
+                            service.product = server
+                    except:
+                        pass
+                
+                session.add(service)
+                services_created.append(service)
+            
+            await session.commit()
+            
+            # 4. Lancer scan_cve pour chaque service identifié
+            for s in services_created:
+                if s.product and s.product != "Unknown":
+                    scan_cve.delay(scan_id, str(s.id), keyword=s.product)
+
+        return {"ip": ip, "ports": open_ports}
 
     try:
         return asyncio.run(logic())
     except Exception as e:
-        logger.error(f"[HTTP Worker] Erreur asynchrone: {e}")
-        return {"alive": False}
+        logger.error(f"[Service Worker] Erreur: {e}")
+        return {"alive": False, "error": str(e)}

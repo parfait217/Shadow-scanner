@@ -16,6 +16,9 @@ class Asset(Base):
     value = Column(String(255), nullable=False)
     is_alive = Column(Boolean, default=False)
     ip = Column(String(45), nullable=True)
+    country = Column(String(100), nullable=True)
+    isp = Column(String(100), nullable=True)
+    asn = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     scan = relationship("Scan", back_populates="assets")

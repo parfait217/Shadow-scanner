@@ -1,9 +1,14 @@
 from app.workers.celery_app import celery_app
 from app.utils.http_client import fetch_json
 from app.core.config import settings
+from app.core.dependencies import get_worker_session
+from app.models.vulnerability import Vulnerability
+from app.models.scan import Scan
+
 import logging
 import asyncio
 import uuid
+from sqlalchemy import update
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +51,46 @@ def scan_cve(self, scan_id: str, service_id: str, cpe_string: str = None, keywor
         vulns = data["vulnerabilities"]
         logger.info(f"[CVE Worker] {len(vulns)} CVE trouvées pour {keyword or cpe_string}.")
         
-        # Parse basic de CVSS
-        for v in vulns[:10]: # Limiter l'insertion aux 10 les plus graves par exemple
-            cve = v.get("cve", {})
-            cve_id = cve.get("id")
-            # Extraction du CVSS v3 ou v2
-            cvss = 0.0
-            metrics = cve.get("metrics", {})
-            if "cvssMetricV31" in metrics:
-                cvss = metrics["cvssMetricV31"][0]["cvssData"]["baseScore"]
-            cve_list.append({"id": cve_id, "score": cvss})
-            
-            # TODO: Insérer Vulnerability dans la BDD (MtoM avec le service)
-            
-    return {"cves": cve_list}
+        async def save_vulns():
+            async with get_worker_session() as session:
+                for v in vulns[:5]: # Limiter à 5 CVE critiques/hautes par service
+                    cve = v.get("cve", {})
+                    cve_id = cve.get("id")
+                    
+                    cvss = 0.0
+                    severity = "UNKNOWN"
+                    metrics = cve.get("metrics", {})
+                    
+                    if "cvssMetricV31" in metrics:
+                        m = metrics["cvssMetricV31"][0]["cvssData"]
+                        cvss = m["baseScore"]
+                        severity = m["baseSeverity"]
+                    elif "cvssMetricV2" in metrics:
+                        m = metrics["cvssMetricV2"][0]["cvssData"]
+                        cvss = m["baseScore"]
+                        # V2 severity is in a different place
+                        severity = metrics["cvssMetricV2"][0].get("baseSeverity", "MEDIUM")
+
+                    vuln = Vulnerability(
+                        id=uuid.uuid4(),
+                        service_id=service_id,
+                        cve_id=cve_id,
+                        cvss_score=cvss,
+                        severity=severity
+                    )
+                    session.add(vuln)
+                
+                # Optionnel : Mettre à jour vulns_count sur le Scan
+                await session.execute(
+                    update(Scan).where(Scan.id == scan_id).values(
+                        vulns_count=Scan.vulns_count + len(vulns[:5])
+                    )
+                )
+                await session.commit()
+
+        try:
+            asyncio.run(save_vulns())
+        except Exception as e:
+            logger.error(f"[CVE Worker] Erreur Save: {e}")
+
+    return {"status": "success"}

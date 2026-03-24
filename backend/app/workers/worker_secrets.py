@@ -1,5 +1,5 @@
 from app.workers.celery_app import celery_app
-from app.utils.http_client import client
+import httpx
 from app.core.config import settings
 import logging
 import asyncio
@@ -17,17 +17,18 @@ async def check_sensitive_files(domain: str):
         "/phpinfo.php"
     ]
     
-    for payload in payloads:
-        url = f"http://{domain}{payload}"
-        try:
-            resp = await client.get(url, timeout=3.0, verify=False, follow_redirects=False)
-            if resp.status_code == 200 and len(resp.text) > 5:
-                # Masquage simple du secret pour RG-F01
-                snippet = resp.text[:50].replace("\n", " ") + "..."
-                if "[core]" in snippet or "APP_KEY=" in snippet or "database" in snippet.lower():
-                    findings.append({"type": payload, "snippet": snippet, "status": "open"})
-        except Exception:
-            pass
+    async with httpx.AsyncClient(timeout=3.0, verify=False) as http_client:
+        for payload in payloads:
+            url = f"http://{domain}{payload}"
+            try:
+                resp = await http_client.get(url, follow_redirects=False)
+                if resp.status_code == 200 and len(resp.text) > 5:
+                    # Masquage simple du secret pour RG-F01
+                    snippet = resp.text[:50].replace("\n", " ") + "..."
+                    if "[core]" in snippet or "APP_KEY=" in snippet or "database" in snippet.lower():
+                        findings.append({"type": payload, "snippet": snippet, "status": "open"})
+            except Exception:
+                pass
             
     return findings
 

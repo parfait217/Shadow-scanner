@@ -1,5 +1,8 @@
 from app.workers.celery_app import celery_app
 from app.utils.http_client import fetch_json
+from app.core.dependencies import get_worker_session
+from app.models.asset import Asset
+from sqlalchemy import update
 import logging
 import asyncio
 
@@ -25,8 +28,23 @@ def scan_geoip(self, scan_id: str, asset_id: str, target_ip: str):
         return None
 
     if geoip_data and geoip_data.get("status") == "success":
-        logger.info(f"[GeoIP Worker] Trouvé pour {target_ip}: {geoip_data.get('country')}, ASN: {geoip_data.get('as')}")
-        # TODO: Mettre à jour la base de données (table Asset)
+        async def save():
+            async with get_worker_session() as session:
+                await session.execute(
+                    update(Asset).where(Asset.id == asset_id).values(
+                        country=geoip_data.get("country"),
+                        isp=geoip_data.get("isp"),
+                        asn=geoip_data.get("as")
+                    )
+                )
+                await session.commit()
+        
+        try:
+            asyncio.run(save())
+            logger.info(f"[GeoIP Worker] Mis à jour pour {target_ip}: {geoip_data.get('country')}")
+        except Exception as e:
+            logger.error(f"[GeoIP Worker] Erreur Save: {e}")
+            
         return geoip_data
         
     return None

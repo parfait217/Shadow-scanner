@@ -2,7 +2,7 @@ from app.workers.celery_app import celery_app
 from app.utils.http_client import fetch_json, fetch_text
 from app.workers.worker_http import scan_http
 # from app.workers.worker_geoip import scan_geoip  # À utiliser plus tard
-from app.core.dependencies import AsyncSessionLocal
+from app.core.dependencies import get_worker_session
 from app.models.asset import Asset
 from app.models.scan import Scan
 
@@ -79,7 +79,7 @@ def scan_dns(self, scan_id: str, target_domain: str):
         logger.info(f"[DNS Worker] {len(found_subdomains)} sous-domaines identifiés.")
 
         # 2. Résolution IP et Persistence
-        async with AsyncSessionLocal() as session:
+        async with get_worker_session() as session:
             # On passe le scan en statut "running"
             await session.execute(
                 update(Scan).where(Scan.id == scan_id).values(status="running")

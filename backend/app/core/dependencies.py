@@ -15,12 +15,36 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Database Session
 # =============================================================================
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
+engine = create_async_engine(settings.DATABASE_URL, echo=False, pool_pre_ping=True)
 AsyncSessionLocal = sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+# Pour les workers Celery (Forking)
+_worker_engine = None
+_WorkerSessionLocal = None
+
+def get_worker_session():
+    """Fournit une session isolée pour les workers Celery afin d'éviter les InterfaceError."""
+    global _worker_engine, _WorkerSessionLocal
+    import os
+    if _worker_engine is None:
+        # Création d'un moteur dédié au processus worker
+        _worker_engine = create_async_engine(
+            settings.DATABASE_URL, 
+            echo=False, 
+            pool_size=10, 
+            max_overflow=20,
+            pool_pre_ping=True
+        )
+        _WorkerSessionLocal = sessionmaker(
+            bind=_worker_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+    return _WorkerSessionLocal()
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dépendance FastAPI pour obtenir une session de BDD."""
