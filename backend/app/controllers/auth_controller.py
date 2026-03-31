@@ -45,7 +45,8 @@ async def refresh_token(
 async def logout(
     request: RefreshTokenRequest,
     current_user: CurrentUser = Depends(get_current_user),
-    auth_service: AuthService = 
+    auth_service: AuthService = Depends(get_auth_service)
+):
     """Invalide le refresh token."""
     await auth_service.logout(current_user.id, request.refresh_token)
 

@@ -30,11 +30,12 @@ def scan_geoip(self, scan_id: str, asset_id: str, target_ip: str):
     if geoip_data and geoip_data.get("status") == "success":
         async def save():
             async with get_worker_session() as session:
+                import uuid
                 await session.execute(
-                    update(Asset).where(Asset.id == asset_id).values(
+                    update(Asset).where(Asset.id == uuid.UUID(asset_id)).values(
                         country=geoip_data.get("country"),
                         isp=geoip_data.get("isp"),
-                        asn=geoip_data.get("as")
+                        asn=str(geoip_data.get("as"))[:100] if geoip_data.get("as") else None
                     )
                 )
                 await session.commit()

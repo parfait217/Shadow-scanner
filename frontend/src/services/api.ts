@@ -35,6 +35,8 @@ export const scanService = {
   getByProject: (projectId: string) => api.get(`/projects/${projectId}/scans`),
   getAssets: (scanId: string) => api.get(`/scans/${scanId}/assets`),
   getVulnerabilities: (scanId: string) => api.get(`/scans/${scanId}/vulnerabilities`),
+  getEmployees: (scanId: string) => api.get(`/scans/${scanId}/employees`),
+  getFindings: (scanId: string) => api.get(`/scans/${scanId}/findings`),
 };
 
 export default api;

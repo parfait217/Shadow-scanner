@@ -10,9 +10,13 @@ const ProjectDetails = () => {
   const [scans, setScans] = useState<any[]>([]);
   const [selectedScan, setSelectedScan] = useState<any>(null);
   const [assets, setAssets] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [findings, setFindings] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'assets' | 'osint' | 'secrets'>('assets');
   const [isLoading, setIsLoading] = useState(true);
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [expandedAsset, setExpandedAsset] = useState<string | null>(null);
+  const [expandedEmployee, setExpandedEmployee] = useState<string | null>(null);
   const [scanningInProgress, setScanningInProgress] = useState(false);
 
   // Charger le projet et ses scans
@@ -41,22 +45,27 @@ const ProjectDetails = () => {
     fetchData();
   }, [id]);
 
-  // Charger les assets quand un scan est sélectionné
+  // Charger les données (assets, osint, secrets) quand un scan est sélectionné
   useEffect(() => {
-    const fetchAssets = async () => {
+    const fetchScanData = async () => {
       if (!selectedScan) return;
       setAssetsLoading(true);
       try {
-        const resp = await scanService.getAssets(selectedScan.id);
-        setAssets(resp.data.items || []);
+        const [assetsResp, empResp, findResp] = await Promise.all([
+          scanService.getAssets(selectedScan.id).catch(() => ({ data: { items: [] } })),
+          scanService.getEmployees(selectedScan.id).catch(() => ({ data: { items: [] } })),
+          scanService.getFindings(selectedScan.id).catch(() => ({ data: { items: [] } }))
+        ]);
+        setAssets(assetsResp.data.items || []);
+        setEmployees(empResp.data.items || []);
+        setFindings(findResp.data.items || []);
       } catch (err) {
-        console.error("Erreur chargement assets:", err);
-        setAssets([]);
+        console.error("Erreur chargement données du scan:", err);
       } finally {
         setAssetsLoading(false);
       }
     };
-    fetchAssets();
+    fetchScanData();
   }, [selectedScan]);
 
   const handleStartScan = async () => {
@@ -81,6 +90,10 @@ const ProjectDetails = () => {
 
   const toggleAssetExpand = (assetId: string) => {
     setExpandedAsset(expandedAsset === assetId ? null : assetId);
+  };
+
+  const toggleEmployeeExpand = (empId: string) => {
+    setExpandedEmployee(expandedEmployee === empId ? null : empId);
   };
 
   const getStatusColor = (status: string) => {
@@ -182,14 +195,39 @@ const ProjectDetails = () => {
         </div>
       )}
 
-      {/* Liste des assets */}
+      {/* Navigation In-Scan (Onglets) */}
+      {selectedScan && (
+        <div className="in-scan-tabs" style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem' }}>
+          <button 
+            className={`tab-btn ${activeTab === 'assets' ? 'active' : ''}`}
+            onClick={() => setActiveTab('assets')}
+            style={{ background: 'none', border: 'none', color: activeTab === 'assets' ? 'var(--accent-primary)' : 'var(--text-muted)', fontSize: '1rem', fontWeight: activeTab === 'assets' ? 600 : 400, borderBottom: activeTab === 'assets' ? '2px solid var(--accent-primary)' : '2px solid transparent', paddingBottom: '0.5rem', cursor: 'pointer' }}
+          >
+            Actifs & Services ({assets.length})
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'osint' ? 'active' : ''}`}
+            onClick={() => setActiveTab('osint')}
+            style={{ background: 'none', border: 'none', color: activeTab === 'osint' ? 'var(--accent-primary)' : 'var(--text-muted)', fontSize: '1rem', fontWeight: activeTab === 'osint' ? 600 : 400, borderBottom: activeTab === 'osint' ? '2px solid var(--accent-primary)' : '2px solid transparent', paddingBottom: '0.5rem', cursor: 'pointer' }}
+          >
+            OSINT & Fuites ({employees.length})
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'secrets' ? 'active' : ''}`}
+            onClick={() => setActiveTab('secrets')}
+            style={{ background: 'none', border: 'none', color: activeTab === 'secrets' ? 'var(--accent-primary)' : 'var(--text-muted)', fontSize: '1rem', fontWeight: activeTab === 'secrets' ? 600 : 400, borderBottom: activeTab === 'secrets' ? '2px solid var(--accent-primary)' : '2px solid transparent', paddingBottom: '0.5rem', cursor: 'pointer' }}
+          >
+            Secrets & Fichiers Sensibles ({findings.length})
+          </button>
+        </div>
+      )}
+
+      {/* Contenu principal en fonction de l'onglet actif */}
+      {activeTab === 'assets' && (
       <div className="assets-section card">
         <h3 className="section-title">
           <Server size={18} />
           Actifs & Sous-domaines Découverts
-          {selectedScan && (
-            <span className="count-badge">{assets.length}</span>
-          )}
         </h3>
 
         {assetsLoading ? (
@@ -297,6 +335,105 @@ const ProjectDetails = () => {
           </div>
         )}
       </div>
+      )}
+
+      {/* Onglet OSINT */}
+      {activeTab === 'osint' && (
+      <div className="assets-section card">
+        <h3 className="section-title">Emails & Employés Découverts</h3>
+        {assetsLoading ? (
+          <div className="loading-placeholder">Recherche de données OSINT...</div>
+        ) : employees.length === 0 ? (
+          <div className="empty-state">
+            <p>Aucun email ou employé trouvé pour ce domaine.</p>
+          </div>
+        ) : (
+          <div className="assets-list">
+            {employees.map((emp: any) => (
+              <div key={emp.id} className="asset-item">
+                <div className="asset-header" onClick={() => toggleEmployeeExpand(emp.id)}>
+                  <div className="asset-main-info">
+                    <span className="asset-value">{emp.email}</span>
+                  </div>
+                  <div className="asset-right">
+                    {emp.breach_count > 0 ? (
+                      <span className="vulns-badge danger">
+                        <AlertTriangle size={12} /> {emp.breach_count} fuites de données
+                      </span>
+                    ) : (
+                      <span className="services-badge" style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e' }}>Sécurisé (Aucune fuite)</span>
+                    )}
+                    {expandedEmployee === emp.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                  </div>
+                </div>
+                {expandedEmployee === emp.id && emp.breaches && emp.breaches.length > 0 && (
+                  <div className="asset-expanded">
+                    <table className="services-table">
+                      <thead>
+                        <tr>
+                          <th>Service Compromis</th>
+                          <th>Date de la Fuite</th>
+                          <th>Données Exposées</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {emp.breaches.map((b: any) => (
+                          <tr key={b.id}>
+                            <td style={{ fontWeight: 600 }}>{b.name}</td>
+                            <td>{b.date ? new Date(b.date).toLocaleDateString() : '—'}</td>
+                            <td className="cve-list">
+                              {b.data_types.split(',').map((type: string, idx: number) => (
+                                <span key={idx} className="cve-tag unknown">{type.trim()}</span>
+                              ))}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      )}
+
+      {/* Onglet Secrets */}
+      {activeTab === 'secrets' && (
+      <div className="assets-section card">
+        <h3 className="section-title">Secrets Exposés & Fichiers Sensibles</h3>
+        {assetsLoading ? (
+          <div className="loading-placeholder">Analyse des fichiers sensibles...</div>
+        ) : findings.length === 0 ? (
+          <div className="empty-state">
+            <p>Aucun fichier sensible ou secret détecté.</p>
+          </div>
+        ) : (
+          <div className="assets-list">
+            <table className="services-table" style={{ marginTop: 0 }}>
+              <thead>
+                <tr>
+                  <th>Fichier / Endpoint</th>
+                  <th>Extrait du Contenu Sensible</th>
+                </tr>
+              </thead>
+              <tbody>
+                {findings.map((f: any) => (
+                  <tr key={f.id}>
+                    <td className="port-cell" style={{ color: 'var(--danger)' }}>{f.source}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: 'rgba(0,0,0,0.2)', padding: '0.5rem', borderRadius: '4px' }}>
+                      {f.masked_value}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      )}
+
     </div>
   );
 };

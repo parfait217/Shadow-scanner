@@ -199,3 +199,49 @@ async def get_scan_score(id: UUID, current_user: CurrentUser = Depends(get_curre
 @router.get("/{id}/topology")
 async def get_scan_topology(id: UUID, current_user: CurrentUser = Depends(get_current_user)):
     return {"nodes": [], "links": []}
+
+from app.models.employee import Employee
+from app.models.breach import Breach
+
+# --- OSINT & Breaches ---
+@router.get("/{id}/employees")
+async def list_employees(
+    id: UUID, page: int = 1, limit: int = 50,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Liste des employés (OSINT) avec leurs brèches."""
+    stmt = (
+        select(Employee)
+        .options(selectinload(Employee.breaches))
+        .where(Employee.scan_id == id)
+    )
+
+    count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+    total = count_result.scalar_one()
+
+    stmt = stmt.order_by(Employee.created_at.desc()).offset((page - 1) * limit).limit(limit)
+    result = await db.execute(stmt)
+    employees = result.scalars().unique().all()
+
+    items = []
+    for emp in employees:
+        breaches_list = [
+            {
+                "id": str(b.id),
+                "name": b.breach_name,
+                "date": b.date.isoformat() if b.date else None,
+                "data_types": b.data_types
+            }
+            for b in emp.breaches
+        ]
+        items.append({
+            "id": str(emp.id),
+            "email": emp.email,
+            "full_name": emp.full_name,
+            "breach_count": len(breaches_list),
+            "breaches": breaches_list
+        })
+        
+    return {"items": items, "total": total}
+

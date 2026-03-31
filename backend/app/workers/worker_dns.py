@@ -109,8 +109,13 @@ def scan_dns(self, scan_id: str, target_domain: str):
                     )
                     await session.commit()
                 
-                if asset.is_alive:
+                if asset.is_alive: # On peut aussi tester HTTP sur les domaines sans IP directe
                     tasks.append(scan_http.s(scan_id, str(asset.id), asset.value))
+                    
+                # Lance la géolocalisation pour toute IP valide
+                if asset.is_alive and asset.ip:
+                    from app.workers.worker_geoip import scan_geoip
+                    scan_geoip.delay(scan_id, str(asset.id), asset.ip)
             
             # Final commit pour le reste
             await session.execute(
