@@ -56,6 +56,16 @@ async def cancel_scan(
     """Annuler un scan en cours (stub)."""
     return {"message": "Scan annulé."}
 
+@router.get("/scans", tags=["Scans"])
+async def list_scans_global(
+    limit: int = 5,
+    current_user: CurrentUser = Depends(get_current_user),
+    scan_service: ScanService = Depends(get_scan_service)
+):
+    """Liste les derniers scans de l'utilisateur (pour le Dashboard)."""
+    scans = await scan_service.get_latest(UUID(current_user.id), limit)
+    return {"items": scans, "total": len(scans)}
+
 @router.get("/scans/{id}/download")
 async def download_scan_json(
     id: UUID,

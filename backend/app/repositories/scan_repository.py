@@ -5,6 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scan import Scan
+from app.models.project import Project
 
 
 class ScanRepository:
@@ -43,3 +44,15 @@ class ScanRepository:
 
     async def delete(self, scan: Scan) -> None:
         await self.session.delete(scan)
+
+    async def get_latest_by_user(self, user_id: UUID, limit: int = 5) -> list[Scan]:
+        """Récupère les derniers scans de l'utilisateur (pour le Dashboard)."""
+        stmt = (
+            select(Scan)
+            .join(Project, Scan.project_id == Project.id)
+            .where(Project.user_id == user_id)
+            .order_by(Scan.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

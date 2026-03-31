@@ -72,3 +72,17 @@ class ScanService:
             raise ScanRunningError(str(scan_id))
 
         await self.scan_repo.delete(scan)
+
+    async def get_latest(self, user_id: UUID, limit: int = 5) -> list[ScanResponse]:
+        """Récupère les derniers scans de l'utilisateur (pour le Dashboard)."""
+        scans = await self.scan_repo.get_latest_by_user(user_id, limit)
+        # On a besoin du nom du projet, donc on charge les infos
+        project_repo = ProjectRepository(self.scan_repo.session)
+        result = []
+        for scan in scans:
+            project = await project_repo.get_by_id(scan.project_id)
+            scan_response = ScanResponse.model_validate(scan)
+            # On ajoute le nom du projet en tant que champ supplémentaire (pas dans le schéma standard)
+            scan_response.project_name = project.name if project else "Inconnu"
+            result.append(scan_response)
+        return result

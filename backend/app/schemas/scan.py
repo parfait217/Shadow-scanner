@@ -12,6 +12,7 @@ class ScanBase(BaseModel):
 class ScanResponse(ScanBase):
     id: UUID
     project_id: UUID
+    project_name: Optional[str] = None  # Nom du projet (pour le Dashboard)
     status: str
     trigger: str
     risk_score: Optional[float] = None

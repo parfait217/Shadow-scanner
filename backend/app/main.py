@@ -90,8 +90,9 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-from app.controllers import auth_controller, user_controller, project_controller, scan_controller, admin_controller, result_controller, report_controller, alert_controller
+from app.controllers import auth_controller, user_controller, project_controller, scan_controller, admin_controller, result_controller, report_controller, alert_controller, dashboard_controller
 
+app.include_router(dashboard_controller.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(auth_controller.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(user_controller.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(project_controller.router, prefix="/api/v1/projects", tags=["Projects"])
