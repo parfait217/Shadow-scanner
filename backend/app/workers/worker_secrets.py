@@ -36,11 +36,6 @@ async def check_sensitive_files(domain: str):
             except Exception:
                 pass
                 
-        # Fake secret for demo purposes
-        if not findings:
-            findings.append({"type": "/.env", "snippet": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE...", "status": "open"})
-            findings.append({"type": "/.git/config", "snippet": "[remote \"origin\"]\n  url = https://github...", "status": "open"})
-            
     return findings
 
 @celery_app.task(bind=True, max_retries=1)

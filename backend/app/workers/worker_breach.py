@@ -20,24 +20,10 @@ def check_breach(self, scan_id: str, employee_id: str, email: str):
     
     breaches = None
     
-    # Sans clé API on utilise une simulation très réaliste
+    # Si pas de clé HIBP, on arrête là. Pas de simulation.
     if not settings.HIBP_API_KEY:
-        logger.debug(f"[Breach Worker] Pas de clé HIBP. Simulation pour {email}.")
-        if "admin" in email or "contact" in email:
-            breaches = [
-                {
-                    "Name": "LinkedIn",
-                    "BreachDate": "2012-05-05",
-                    "DataClasses": ["Email addresses", "Passwords"]
-                },
-                {
-                    "Name": "Canva",
-                    "BreachDate": "2019-05-24",
-                    "DataClasses": ["Email addresses", "Passwords", "Names"]
-                }
-            ]
-        else:
-            return {"breaches": []}
+        logger.debug(f"[Breach Worker] Pas de clé HIBP. Scan annulé pour {email} (pas de données factices).")
+        return {"breaches": []}
     else:
         async def fetch():
             url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"

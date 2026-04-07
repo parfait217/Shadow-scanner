@@ -17,12 +17,10 @@ def harvest_emails(self, scan_id: str, root_domain: str):
     """
     logger.info(f"[Harvester Worker] Recherche OSINT pour {root_domain}")
     
-    found_emails = [
-        f"admin@{root_domain}",
-        f"contact@{root_domain}",
-        f"it-support@{root_domain}",
-        f"security@{root_domain}"
-    ]
+    # Sans API tierce (ex: Hunter.io), la découverte purement OSINT des emails
+    # demande des scrapers complexes (TheHarvester). 
+    # Pour l'instant, on s'en tient à des résultats 100% réels : liste vide s'il n'y a pas d'intégration.
+    found_emails = []
     
     logger.info(f"[Harvester Worker] {len(found_emails)} emails trouvés.")
 
