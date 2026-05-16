@@ -23,28 +23,23 @@ AsyncSessionLocal = sessionmaker(
 )
 
 # Pour les workers Celery (Forking)
-_worker_engine = None
-_WorkerSessionLocal = None
+from sqlalchemy.pool import NullPool
 
 def get_worker_session():
-    """Fournit une session isolée pour les workers Celery afin d'éviter les InterfaceError."""
-    global _worker_engine, _WorkerSessionLocal
-    import os
-    if _worker_engine is None:
-        # Création d'un moteur dédié au processus worker
-        _worker_engine = create_async_engine(
-            settings.DATABASE_URL, 
-            echo=False, 
-            pool_size=10, 
-            max_overflow=20,
-            pool_pre_ping=True
-        )
-        _WorkerSessionLocal = sessionmaker(
-            bind=_worker_engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-    return _WorkerSessionLocal()
+    """Fournit une session isolée pour les workers Celery afin d'éviter les problèmes d'Event Loop fermée."""
+    # Création d'un moteur dédié sans pooling pour les tâches Celery
+    # Cela évite que les connexions soient réutilisées à travers différents appels asyncio.run()
+    worker_engine = create_async_engine(
+        settings.DATABASE_URL, 
+        echo=False, 
+        poolclass=NullPool
+    )
+    WorkerSessionLocal = sessionmaker(
+        bind=worker_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    return WorkerSessionLocal()
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dépendance FastAPI pour obtenir une session de BDD."""

@@ -12,6 +12,7 @@ from app.workers.worker_geoip import scan_geoip
 from app.core.dependencies import get_worker_session
 from app.models.scan import Scan
 from sqlalchemy import update
+from app.utils.redis_pub import publish_scan_update
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,9 @@ def finalize_scan(self, results, scan_id: str):
                 )
             )
             await session.commit()
+            
+            # Notifier le frontend que le scan est fini
+            await publish_scan_update(scan_id, "REFRESH", {"type": "status", "status": "completed"})
     
     try:
         asyncio.run(_update_db())

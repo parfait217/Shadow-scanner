@@ -18,6 +18,37 @@ const ProjectDetails = () => {
   const [expandedAsset, setExpandedAsset] = useState<string | null>(null);
   const [expandedEmployee, setExpandedEmployee] = useState<string | null>(null);
   const [scanningInProgress, setScanningInProgress] = useState(false);
+  const [isLive, setIsLive] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Connexion WebSocket pour le temps réel
+  useEffect(() => {
+    if (!id) return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Utiliser l'hôte de l'API (à adapter si déployé)
+    const wsUrl = `${protocol}//localhost:8000/api/v1/ws/${id}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => setIsLive(true);
+    ws.onclose = () => setIsLive(false);
+    
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.event === "REFRESH") {
+          console.log("WebSocket REFRESH:", message.data);
+          // Incrémenter le trigger pour forcer le rechargement des données
+          setRefreshTrigger(prev => prev + 1);
+        }
+      } catch (e) {
+        console.error("Erreur parsing WS message:", e);
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [id]);
 
   // Charger le projet et ses scans
   useEffect(() => {
@@ -43,7 +74,7 @@ const ProjectDetails = () => {
       }
     };
     fetchData();
-  }, [id]);
+  }, [id, refreshTrigger]);
 
   // Charger les données (assets, osint, secrets) quand un scan est sélectionné
   useEffect(() => {
@@ -66,7 +97,7 @@ const ProjectDetails = () => {
       }
     };
     fetchScanData();
-  }, [selectedScan]);
+  }, [selectedScan?.id, refreshTrigger]); // Dépendance sur l'ID du scan plutôt que l'objet complet pour éviter les boucles, plus le refreshTrigger
 
   const handleStartScan = async () => {
     if (!id) return;
@@ -131,7 +162,15 @@ const ProjectDetails = () => {
         <div className="header-info">
           <div className="header-title-row">
             <div>
-              <h2 className="page-title">{project.name}</h2>
+              <h2 className="page-title">
+                {project.name}
+                {isLive && (
+                  <span className="live-badge" style={{ marginLeft: '10px', fontSize: '0.6rem', background: 'rgba(34, 197, 94, 0.2)', color: 'var(--success)', padding: '2px 8px', borderRadius: '12px', verticalAlign: 'middle', animation: 'pulse 2s infinite' }}>
+                    <span style={{ display: 'inline-block', width: '6px', height: '6px', background: 'var(--success)', borderRadius: '50%', marginRight: '4px' }}></span>
+                    LIVE
+                  </span>
+                )}
+              </h2>
               <p className="page-subtitle">
                 <Globe size={14} /> {project.root_domain}
               </p>
